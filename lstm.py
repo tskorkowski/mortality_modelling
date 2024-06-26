@@ -50,6 +50,7 @@ class LstmLayer(nn.Module):
         """
         bs, seq_sz, _ = x.size()
         hidden_seq = []
+        output_sq = []
         if init_states is None:
             h_t, c_t = (
                 torch.zeros(bs, self.hidden_size).to(x.device),
@@ -74,28 +75,36 @@ class LstmLayer(nn.Module):
             h_t = o_t * torch.tanh(c_t)
 
             hidden_seq.append(h_t.unsqueeze(0))
+            output_sq.append(o_t.unsqueeze(0))
 
         # Reshape hidden_seq p/ retornar
         hidden_seq = torch.cat(hidden_seq, dim=0)
         hidden_seq = hidden_seq.transpose(0, 1).contiguous()
 
-        return o_t, (h_t, c_t)
+        # Reshape output_seq and store for the next layer
+        output_sq = torch.cat(output_sq, dim=0)
+        output_sq = output_sq.transpose(0, 1).contiguous()
+
+        return output_sq, h_t
 
 
 class LstmModel(nn.Module):
     def __init__(self, input_sz: int, hidden_sz: int, num_layers: int) -> None:
         super().__init__()
-        self.lstm_layers = nn.ModuleList(
-            [LstmLayer(input_sz, hidden_sz) for _ in range(num_layers)]
-        )
+        self.hidden_size = hidden_sz
+        self.lstm_layers = nn.ModuleList()
+        for i in range(num_layers):
+            if i == 0:
+                self.lstm_layers.append(LstmLayer(input_sz, hidden_sz))
+            else:
+                self.lstm_layers.append(LstmLayer(hidden_sz, hidden_sz))
 
         # bring the output to the correct level
         self.fc = nn.Linear(hidden_sz, 1)
 
     def forward(self, x):
-        h_t, c_t = None, None
         for layer in self.lstm_layers:
-            x, (h_t, c_t) = layer(x, (h_t, c_t))
+            x, h_t = layer(x)
 
         h_out = h_t.view(-1, self.hidden_size)
         return self.fc(h_out)
